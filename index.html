@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wordhoard</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#f4eedf">
+<style>
+:root{--bg:#f4eedf;--card:#faf6ea;--ink:#38362f;--muted:#6f6b5d;--line:#ddd3bb;--acc:#4f7461;--accink:#fbf8ee;--soft:#e4e8d9;--good:#dbe6d3;--bad:#efd9d0;--serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;--sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+:root[data-theme=dark]{--bg:#212421;--card:#2a2e2a;--ink:#e7e2d3;--muted:#a09d8d;--line:#3b413b;--acc:#93b49e;--accink:#1d201d;--soft:#343a34;--good:#34493a;--bad:#4d3a35}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#212421;--card:#2a2e2a;--ink:#e7e2d3;--muted:#a09d8d;--line:#3b413b;--acc:#93b49e;--accink:#1d201d;--soft:#343a34;--good:#34493a;--bad:#4d3a35}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.45}
+body{padding:env(safe-area-inset-top) 0 calc(72px + env(safe-area-inset-bottom))}
+header{display:flex;gap:8px;align-items:center;padding:12px 16px;max-width:620px;margin:0 auto}
+header h1{font:600 1.35rem var(--serif);margin:0;flex:1}
+select,input,textarea,button{font:inherit;color:inherit}
+select,input[type=text],textarea{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
+select{width:auto;max-width:120px;padding:8px}
+textarea{resize:vertical;min-height:64px}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+main{max-width:620px;margin:0 auto;padding:4px 16px 16px}
+label{display:block;font-size:.88rem;color:var(--muted);margin:14px 0 5px}
+.btn{background:var(--acc);color:var(--accink);border:0;border-radius:10px;padding:12px 16px;font-weight:600;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn.sm{padding:8px 12px;font-size:.9rem}
+.btn:disabled{opacity:.5}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:8px 14px;cursor:pointer;font-size:.92rem}
+.chip.on{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:10px 0}
+.big{font:600 2.2rem var(--serif)}
+.word{font:600 1.7rem var(--serif);margin:4px 0}
+.muted{color:var(--muted);font-size:.9rem}
+.opt{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 14px;margin:8px 0;cursor:pointer}
+.opt.good{background:var(--good)}.opt.bad{background:var(--bad)}
+.item{display:flex;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.item b{font-family:var(--serif);font-size:1.1rem}
+.lv{font-size:.8rem;color:var(--muted);white-space:nowrap}
+nav{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;border:0;padding:14px 4px;color:var(--muted);font-weight:600;cursor:pointer}
+nav button.on{color:var(--acc);box-shadow:inset 0 3px 0 var(--acc)}
+.fb{padding:12px;border-radius:10px;margin:10px 0}
+.fb.good{background:var(--good)}.fb.bad{background:var(--bad)}
+#toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.show{opacity:1}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Wordhoard</h1>
+  <select id="prof" aria-label="Profile"></select>
+  <button class="btn ghost sm" id="newprof" aria-label="Add profile">+</button>
+  <button class="btn ghost sm" id="theme" aria-label="Toggle light or dark">◐</button>
+</header>
+<main id="main"></main>
+<nav>
+  <button data-tab="home">Quiz</button>
+  <button data-tab="add">Add</button>
+  <button data-tab="words">Words</button>
+</nav>
+<div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const LV=['Pick the meaning','Pick the word','Type the word','Recall the meaning'];
+const DAYS=[0,1,3,7,14,30,60];
+let db,words=[],tags=[],tab='home',edit=null,selTags=new Set(),quizTag='All',wTag='All',wQ='',quiz=null;
+
+/* ---------- storage (IndexedDB, one database per profile) ---------- */
+const profiles=()=>JSON.parse(localStorage.getItem('wh_profiles')||'["Me"]');
+let cur=localStorage.getItem('wh_cur')||profiles()[0];
+function open(name){return new Promise((res,rej)=>{const r=indexedDB.open('wordhoard_'+name,1);
+  r.onupgradeneeded=()=>{r.result.createObjectStore('words',{keyPath:'id'});r.result.createObjectStore('meta')};
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+const store=(n,m='readonly')=>db.transaction(n,m).objectStore(n);
+const req=r=>new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+const putWord=w=>req(store('words','readwrite').put(w));
+const delWord=id=>req(store('words','readwrite').delete(id));
+const saveTags=()=>req(store('meta','readwrite').put(tags,'tags'));
+async function load(){
+  if(db)db.close();
+  db=await open(cur);
+  words=await req(store('words').getAll());
+  tags=(await req(store('meta').get('tags')))||['Scots','Archaic'];
+  render();
+}
+
+/* ---------- helpers ---------- */
+const defOf=w=>w.custom||w.def||'';
+const shuffle=a=>{a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a};
+const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)};
+const norm=s=>s.trim().toLowerCase().replace(/\s+/g,' ');
+const chips=(list,on,attr)=>list.map(t=>`<button class="chip ${on(t)?'on':''}" ${attr}="${esc(t)}" aria-pressed="${on(t)}">${esc(t)}</button>`).join('');
+
+/* ---------- views ---------- */
+function render(){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
+  ({home:vHome,add:vAdd,words:vWords})[tab]();
+}
+function pool(){return words.filter(w=>defOf(w)&&(quizTag==='All'||w.tags.includes(quizTag)))}
+function vHome(){
+  if(quiz){return vQuiz()}
+  const p=pool(),due=p.filter(w=>w.due<=Date.now());
+  $('#main').innerHTML=`<div class="card"><div class="big">${due.length}</div><div class="muted">word${due.length===1?'':'s'} due for review</div></div>
+  <label>Quiz which words?</label><div class="row">${chips(['All',...tags],t=>t===quizTag,'data-qtag')}</div>
+  <div class="row" style="margin-top:18px"><button class="btn" id="go" ${p.length<2?'disabled':''}>${due.length?'Start review':'Practice anyway'}</button></div>
+  ${p.length<2?'<p class="muted">Add at least two words with definitions to start.</p>':''}`;
+}
+function start(){
+  const p=pool(),due=p.filter(w=>w.due<=Date.now());
+  quiz={q:shuffle(due.length?due:p).slice(0,20),i:0,missed:[],done:false,ans:false};
+  nextQ();
+}
+function nextQ(){
+  if(quiz.i>=quiz.q.length){quiz.done=true;return render()}
+  const w=quiz.q[quiz.i];quiz.w=w;quiz.ans=false;quiz.rev=false;
+  if(w.level<2){
+    const all=words.filter(x=>x.id!==w.id&&defOf(x));
+    const key=x=>w.level===0?defOf(x):x.word;
+    const near=shuffle(all.filter(x=>(x.pos&&x.pos===w.pos)||x.tags.some(t=>w.tags.includes(t))));
+    const rest=shuffle(all.filter(x=>!near.includes(x)));
+    const seen=new Set([key(w)]),opts=[];
+    for(const x of [...near,...rest]){if(opts.length>=3)break;if(!seen.has(key(x))){seen.add(key(x));opts.push(key(x))}}
+    quiz.opts=shuffle([key(w),...opts]);
+  }
+  render();
+}
+function vQuiz(){
+  const m=$('#main');
+  if(quiz.done){
+    m.innerHTML=`<div class="card"><div class="word">Session finished</div><p>${quiz.q.length-quiz.missed.length} of ${quiz.q.length} correct.</p>
+    ${quiz.missed.length?'<div class="muted">To revisit</div>'+quiz.missed.map(w=>`<div class="item" style="cursor:default"><b>${esc(w.word)}</b><span class="muted">${esc(defOf(w))}</span></div>`).join(''):''}</div>
+    <button class="btn" id="end">Done</button>`;return}
+  const w=quiz.w,L=w.level;
+  let h=`<div class="muted">${quiz.i+1} of ${quiz.q.length} · ${LV[L]}</div><div class="card">`;
+  if(L===0||L===3)h+=`<div class="word">${esc(w.word)}</div><div class="muted">${esc(w.pos||'')}</div>`;
+  else h+=`<div>${esc(defOf(w))}</div>`;
+  h+='</div>';
+  if(L<2)h+=quiz.opts.map((o,i)=>`<button class="opt" data-opt="${i}" ${quiz.ans?'disabled':''}>${esc(o)}</button>`).join('');
+  if(L===2)h+=`<input type="text" id="typed" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="Type the word" ${quiz.ans?'disabled':''}><div class="row" style="margin-top:10px"><button class="btn" id="check" ${quiz.ans?'disabled':''}>Check</button></div>`;
+  if(L===3&&!quiz.rev)h+=`<button class="btn" id="reveal">Show meaning</button>`;
+  if(L===3&&quiz.rev&&!quiz.ans)h+=`<div class="card">${esc(defOf(w))}</div><div class="row"><button class="btn" data-self="1">I knew it</button><button class="btn ghost" data-self="0">I missed it</button></div>`;
+  if(quiz.ans)h+=`<div class="fb ${quiz.ok?'good':'bad'}">${quiz.ok?'Correct.':'Not quite.'} ${quiz.ok&&L!==3?'':`<b>${esc(L===0||L===3?defOf(w):w.word)}</b>`}</div><button class="btn" id="next">Next</button>`;
+  m.innerHTML=h+'<div style="margin-top:14px"><button class="btn ghost sm" id="end">Stop</button></div>';
+  if(L===2&&!quiz.ans)$('#typed').focus();
+}
+function grade(ok){
+  const w=quiz.w;quiz.ans=true;quiz.ok=ok;
+  if(ok){w.level=Math.min(3,w.level+1);w.box=(w.box||0)+1;w.due=Date.now()+DAYS[Math.min(w.box,6)]*864e5}
+  else{w.level=Math.max(0,w.level-1);w.box=0;w.due=Date.now();quiz.missed.push(w)}
+  putWord(w);
+}
+function vAdd(){
+  const w=edit||{word:'',pos:'',def:'',custom:'',tags:[]};
+  if(edit)selTags=new Set(w.tags);
+  $('#main').innerHTML=`<div class="row"><b style="font-family:var(--serif);font-size:1.3rem;flex:1">${edit?'Edit word':'Add a word'}</b></div>
+  <label for="fw">Word</label>
+  <div class="row" style="flex-wrap:nowrap"><input type="text" id="fw" value="${esc(w.word)}" autocapitalize="off" autocomplete="off" spellcheck="false"><button class="btn sm" id="look">Look up</button></div>
+  <div class="muted" id="st"></div>
+  <label for="fp">Part of speech</label><input type="text" id="fp" value="${esc(w.pos)}">
+  <label for="fd">Dictionary definition</label><textarea id="fd" data-auto="${w.def?0:1}">${esc(w.def)}</textarea>
+  <label for="fc">My definition (used first in quizzes)</label><textarea id="fc">${esc(w.custom)}</textarea>
+  <label>Tags</label><div class="row" id="tagrow">${chips(tags,t=>selTags.has(t),'data-tag')}</div>
+  <div class="row" style="margin-top:10px;flex-wrap:nowrap"><input type="text" id="nt" placeholder="New tag"><button class="btn ghost sm" id="addtag">Add tag</button></div>
+  <div class="row" style="margin-top:20px"><button class="btn" id="save">Save word</button>${edit?'<button class="btn ghost" id="cancel">Cancel</button><button class="btn ghost" id="del">Delete</button>':''}</div>`;
+}
+function vWords(){
+  $('#main').innerHTML=`<input type="text" id="wq" placeholder="Search words" value="${esc(wQ)}">
+  <div class="row" style="margin:10px 0">${chips(['All',...tags],t=>t===wTag,'data-wtag')}</div>
+  <div id="list"></div>
+  <label>Manage tags</label><div class="row">${tags.map(t=>`<span class="chip">${esc(t)} <button data-deltag="${esc(t)}" aria-label="Delete tag ${esc(t)}" style="background:none;border:0;cursor:pointer;color:var(--muted)">×</button></span>`).join('')}</div>
+  <label>Backup</label><div class="row"><button class="btn ghost sm" id="exp">Export backup</button><button class="btn ghost sm" id="imp">Import backup</button><input type="file" id="file" accept=".json" hidden></div>`;
+  list();
+}
+function list(){
+  const q=wQ.toLowerCase();
+  const ws=words.filter(w=>(wTag==='All'||w.tags.includes(wTag))&&(!q||w.word.toLowerCase().includes(q)||defOf(w).toLowerCase().includes(q))).sort((a,b)=>a.word.localeCompare(b.word));
+  $('#list').innerHTML=ws.length?ws.map(w=>`<div class="item" data-edit="${w.id}"><div><b>${esc(w.word)}</b> <span class="muted">${esc(w.pos)}</span><div class="muted">${esc(defOf(w))}</div></div><div class="lv">${LV[w.level]}</div></div>`).join(''):'<p class="muted">No words yet. Add one from the Add tab.</p>';
+}
+
+/* ---------- lookup ---------- */
+async function lookup(){
+  const word=$('#fw').value.trim(),st=$('#st');if(!word)return;
+  st.textContent='Looking up…';
+  try{
+    const r=await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(word));
+    if(!r.ok)throw 0;
+    const m=(await r.json())[0].meanings[0],fd=$('#fd');
+    if(!$('#fp').value)$('#fp').value=m.partOfSpeech;
+    if(!fd.value||fd.dataset.auto==='1'){fd.value=m.definitions[0].definition;fd.dataset.auto='1'}
+    st.textContent='Found. You can edit it or add your own below.';
+  }catch{st.textContent='No dictionary entry (or you are offline). Write your own definition below.'}
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click',async e=>{
+  const t=e.target,c=s=>t.closest(s);
+  let b;
+  if(b=c('nav button')){tab=b.dataset.tab;edit=null;selTags=new Set();return render()}
+  if(b=c('[data-qtag]')){quizTag=b.dataset.qtag;return render()}
+  if(b=c('[data-wtag]')){wTag=b.dataset.wtag;return render()}
+  if(b=c('[data-tag]')){const v=b.dataset.tag;selTags.has(v)?selTags.delete(v):selTags.add(v);b.classList.toggle('on');b.setAttribute('aria-pressed',selTags.has(v));return}
+  if(b=c('[data-deltag]')){const v=b.dataset.deltag;if(!confirm(`Delete the tag "${v}" from all words?`))return;
+    tags=tags.filter(x=>x!==v);await saveTags();for(const w of words)if(w.tags.includes(v)){w.tags=w.tags.filter(x=>x!==v);await putWord(w)}return render()}
+  if(b=c('[data-edit]')){edit=words.find(w=>w.id===b.dataset.edit);tab='add';return render()}
+  if(b=c('[data-opt]')){if(quiz.ans)return;const i=+b.dataset.opt,L=quiz.w.level,right=L===0?defOf(quiz.w):quiz.w.word;
+    const ok=quiz.opts[i]===right;grade(ok);render();
+    document.querySelectorAll('[data-opt]').forEach(o=>{const v=quiz.opts[+o.dataset.opt];if(v===right)o.classList.add('good');else if(+o.dataset.opt===i)o.classList.add('bad')});return}
+  if(b=c('[data-self]')){grade(b.dataset.self==='1');return render()}
+  switch(c('button')?.id){
+    case'look':return lookup();
+    case'go':return start();
+    case'end':quiz=null;return render();
+    case'next':quiz.i++;return nextQ();
+    case'reveal':quiz.rev=true;return render();
+    case'check':{const v=$('#typed').value;if(!v.trim())return;grade(norm(v)===norm(quiz.w.word));return render()}
+    case'addtag':{const v=$('#nt').value.trim();if(!v)return;if(!tags.some(x=>x.toLowerCase()===v.toLowerCase())){tags.push(v);await saveTags()}selTags.add(tags.find(x=>x.toLowerCase()===v.toLowerCase()));
+      const keep={w:$('#fw').value,p:$('#fp').value,d:$('#fd').value,c:$('#fc').value,a:$('#fd').dataset.auto};
+      vAdd();$('#fw').value=keep.w;$('#fp').value=keep.p;$('#fd').value=keep.d;$('#fc').value=keep.c;$('#fd').dataset.auto=keep.a;return}
+    case'save':return save();
+    case'cancel':edit=null;tab='words';return render();
+    case'del':if(confirm('Delete this word?')){await delWord(edit.id);words=words.filter(w=>w.id!==edit.id);edit=null;tab='words';toast('Deleted');render()}return;
+    case'exp':{const blob=new Blob([JSON.stringify({profile:cur,tags,words},null,1)],{type:'application/json'});
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wordhoard-${cur}.json`;a.click();return}
+    case'imp':return $('#file').click();
+  }
+});
+document.addEventListener('input',e=>{
+  if(e.target.id==='wq'){wQ=e.target.value;list()}
+  if(e.target.id==='fd')e.target.dataset.auto='0';
+});
+document.addEventListener('change',async e=>{
+  if(e.target.id==='fw'&&!edit)lookup();
+  if(e.target.id==='file'){try{
+    const d=JSON.parse(await e.target.files[0].text());
+    for(const t of d.tags||[])if(!tags.includes(t))tags.push(t);await saveTags();
+    for(const w of d.words||[]){await putWord(w);words=words.filter(x=>x.id!==w.id);words.push(w)}
+    toast(`Imported ${(d.words||[]).length} words`);render()}catch{toast('That file could not be read')}}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='typed')$('#check').click()});
+async function save(){
+  const word=$('#fw').value.trim();if(!word)return toast('Enter a word first');
+  const dup=words.find(w=>w.word.toLowerCase()===word.toLowerCase()&&(!edit||w.id!==edit.id));
+  if(dup&&!confirm(`"${dup.word}" is already saved. Save another entry?`))return;
+  const w=edit||{id:crypto.randomUUID(),level:0,box:0,due:Date.now(),added:Date.now()};
+  Object.assign(w,{word,pos:$('#fp').value.trim(),def:$('#fd').value.trim(),custom:$('#fc').value.trim(),tags:[...selTags]});
+  if(!defOf(w))return toast('Add a definition first');
+  await putWord(w);if(!edit)words.push(w);
+  const was=edit;edit=null;selTags=new Set();toast('Saved');
+  if(was)tab='words';render();
+}
+
+/* ---------- profiles & theme ---------- */
+function drawProfiles(){$('#prof').innerHTML=profiles().map(p=>`<option ${p===cur?'selected':''}>${esc(p)}</option>`).join('')}
+$('#prof').onchange=e=>{cur=e.target.value;localStorage.setItem('wh_cur',cur);quiz=null;edit=null;load()};
+$('#newprof').onclick=()=>{const n=(prompt('New profile name')||'').trim();if(!n)return;
+  const p=profiles();if(!p.includes(n)){p.push(n);localStorage.setItem('wh_profiles',JSON.stringify(p))}
+  cur=n;localStorage.setItem('wh_cur',cur);drawProfiles();quiz=null;load()};
+$('#theme').onclick=()=>{const d=document.documentElement,dark=d.dataset.theme?d.dataset.theme==='dark':matchMedia('(prefers-color-scheme:dark)').matches;
+  d.dataset.theme=dark?'light':'dark';localStorage.setItem('wh_theme',d.dataset.theme)};
+if(localStorage.getItem('wh_theme'))document.documentElement.dataset.theme=localStorage.getItem('wh_theme');
+drawProfiles();
+if(navigator.storage?.persist)navigator.storage.persist();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');
+load();
+</script>
+</body>
+</html>
