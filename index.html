@@ -157,8 +157,8 @@ function vAdd(){
   const w=edit||{word:'',pos:'',def:'',custom:'',tags:[]};
   if(edit)selTags=new Set(w.tags);
   $('#main').innerHTML=`<div class="row"><b style="font-family:var(--serif);font-size:1.3rem;flex:1">${edit?'Edit word':'Add a word'}</b></div>
-  <label for="fw">Word</label>
-  <div class="row" style="flex-wrap:nowrap"><input type="text" id="fw" value="${esc(w.word)}" autocapitalize="off" autocomplete="off" spellcheck="false"><button class="btn sm" id="look">Look up</button></div>
+  <label for="fw">Word, or paste a dictionary page link</label>
+  <div class="row" style="flex-wrap:nowrap"><input type="text" id="fw" placeholder="dreich or https://…" value="${esc(w.word)}" autocapitalize="off" autocomplete="off" spellcheck="false"><button class="btn sm" id="look">Look up</button></div>
   <div class="muted" id="st"></div>
   <label for="fp">Part of speech</label><input type="text" id="fp" value="${esc(w.pos)}">
   <label for="fd">Dictionary definition</label><textarea id="fd" data-auto="${w.def?0:1}">${esc(w.def)}</textarea>
@@ -184,6 +184,7 @@ function list(){
 /* ---------- lookup ---------- */
 async function lookup(){
   const word=$('#fw').value.trim(),st=$('#st');if(!word)return;
+  if(/^https?:\/\//i.test(word))return scrape(word);
   st.textContent='Looking up…';
   try{
     const r=await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(word));
@@ -193,6 +194,32 @@ async function lookup(){
     if(!fd.value||fd.dataset.auto==='1'){fd.value=m.definitions[0].definition;fd.dataset.auto='1'}
     st.textContent='Found. You can edit it or add your own below.';
   }catch{st.textContent='No dictionary entry (or you are offline). Write your own definition below.'}
+}
+
+async function fetchPage(u){
+  const tries=[u,'https://api.allorigins.win/raw?url='+encodeURIComponent(u),'https://corsproxy.io/?'+encodeURIComponent(u)];
+  for(const t of tries){try{const r=await fetch(t);if(r.ok){const h=await r.text();if(h.length>200)return h}}catch{}}
+  throw 0;
+}
+async function scrape(u){
+  const st=$('#st');st.textContent='Fetching page…';
+  let doc,url;
+  try{url=new URL(u);doc=new DOMParser().parseFromString(await fetchPage(u),'text/html')}
+  catch{st.textContent='Could not read that page (offline, or the site blocks it). Type the word and write your own definition.';return}
+  const seg=decodeURIComponent(url.pathname.split('/').filter(Boolean).pop()||'').replace(/[-_+]+/g,' ').replace(/\.\w+$/,'').trim();
+  const qp=['q','word','search','s','term'].map(k=>url.searchParams.get(k)).find(Boolean);
+  const h1=(doc.querySelector('h1')?.textContent||'').trim().split('\n')[0].trim();
+  const word=/^[\p{L}' ]{2,40}$/u.test(seg)?seg:(qp||(h1.length<40?h1:''));
+  let def='';
+  for(const s of ['.definition','.def','[class*="definition"]','[class*="sense"]','[itemprop="description"]','ol li','meta[property="og:description"]','meta[name="description"]']){
+    const el=doc.querySelector(s);if(!el)continue;
+    const t=(el.content||el.textContent||'').replace(/\s+/g,' ').trim();
+    if(t.length>8){def=t.slice(0,300);break}
+  }
+  if(word)$('#fw').value=word;
+  const fd=$('#fd');
+  if(def&&(!fd.value||fd.dataset.auto==='1')){fd.value=def;fd.dataset.auto='1'}
+  st.textContent=def?'Pulled from the page. Check the word and definition, since sites differ.':'Page loaded but no definition was found. Write your own below.';
 }
 
 /* ---------- events ---------- */
